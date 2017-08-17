@@ -1,0 +1,90 @@
+from BOVW_functions import *
+from sklearn.metrics import roc_curve, auc
+import scipy.io as sio
+import glob
+
+def getFeaturesFromNN(rootpath, needcodebook = False):
+    current_GT_id=0
+    features=[]
+    GT_ids=[]
+    GT_labels=[]
+    classpath = sorted(glob.glob(rootpath+'*'))
+    for i in classpath:
+        filespath = sorted(glob.glob(i+'/*.mat'))
+        for j in filespath:
+            matlab_file = sio.loadmat(j)
+            feat = np.squeeze(np.asarray(matlab_file['scores']))
+            if needcodebook:
+                feat = np.reshape(feat,(feat.shape[0]*feat.shape[1], feat.shape[2]))
+            features.append(feat)
+            GT_ids.append(current_GT_id)
+            GT_labels.append(i.split('/')[-1])
+        current_GT_id+=1
+    return(features,GT_ids,GT_labels)
+
+
+if __name__ == '__main__':
+
+    directory='../DL_feat/'
+    folder='output_conv4/'
+
+    need_codebook = 1
+
+    num_samples=50000
+
+    k= 5000
+
+    folds = 5
+    start=0.001
+    end=10
+    numparams=30
+
+    doPCA = False # Do PCA before K Means
+
+    codebook_filename='CB_'+'_'+str(num_samples)+'samples_'+str(k)+'centroids.dat'
+    visual_words_filename_train='VW_train_'+'_'+str(num_samples)+'samples_'+str(k)+'centroids.dat'
+    visual_words_filename_test='VW_test_'+'_'+str(num_samples)+'samples_'+str(k)+'centroids.dat'
+
+    # Name of the accuracy file    text_file = open("Output.txt", "a")
+
+    features_train,GT_ids_train,GT_labels_train = getFeaturesFromNN(directory+folder+'train/', need_codebook)
+    features_test,GT_ids_test,GT_labels_test = getFeaturesFromNN(directory+folder+'test/', need_codebook)
+
+    if need_codebook:
+        CB=getAndSaveCodebook(features_train, num_samples, k, codebook_filename, doPCA, 60)
+        VW_train=getAndSaveBoVWRepresentation(features_train,k,CB,visual_words_filename_train)
+        VW_test=getAndSaveBoVWRepresentation(features_test,k,CB,visual_words_filename_test)
+    else:
+        VW_train = features_train
+        VW_test = features_test
+
+    ac_BOVW_L,cm,fpr,tpr,roc_auc = trainAndTestLinearSVM_withfolds(VW_train,VW_test,GT_ids_train,GT_ids_test,folds,start,end,numparams)
+
+    names = unique_elements(GT_labels_test)
+    # Name of the confusion matrix file
+    savename = str(folds) + 'deep_CN.png'
+    #Name of the ROC Curve file
+    save = str(folds) +'deep_ROC.png'
+    plot_confusion_matrix(cm,names,savename)
+    print 'The accuracy is ' + str(ac_BOVW_L) + '\n'
+
+
+    plt.figure()
+    plt.plot(fpr["macro"], tpr["macro"],
+         label='macro-average ROC curve (area = {0:0.2f})'
+               ''.format(roc_auc["macro"]),
+         linewidth=2)
+
+    for i in range(8):
+        plt.plot(fpr[i], tpr[i], label='ROC curve of class {0} (area = {1:0.2f})'
+                                       ''.format(i, roc_auc[i]))
+
+    plt.plot([0, 1], [0, 1], 'k--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Some extension of Receiver operating characteristic to multi-class')
+    plt.legend(loc="lower right")
+    plt.savefig(save)
+    plt.close()
